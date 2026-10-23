@@ -1,0 +1,5 @@
+disable.it
+__pycache__/
+# Workshop previews of other mods are generated locally by tools/make_thumbs.py
+resources/gfx/ui/bettermods/thumbs/*
+!resources/gfx/ui/bettermods/thumbs/better-mods-menu.png

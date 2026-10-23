@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+    <name>Better Mods Menu</name>
+    <directory>better-mods-menu</directory>
+    <id>3819892905</id>
+    <description>[h1]Better Mods Menu[/h1]
+The vanilla Mods menu, redrawn with the game's own paper sprites and made actually usable with a big mod list. This mod is fully vibe-coded.
+
+[b]Requires REPENTOGON.[/b]
+
+[list]
+[*] The page stays still and the list scrolls smoothly under its header
+[*] Checkboxes, category stamps (API / CONTENT / QOL / VISUAL) and a pending-change marker on every mod
+[*] Info card: name, version, Workshop id, tags, preview picture and the description
+[*] Dependency warnings when an enabled mod needs one that is off; press D to enable what is missing
+[*] Filters (Q/E or LB/RB): all, on, off, pinned, API, content, QoL, visual, changed, broken
+[*] Sorting (S): by name, enabled first, by category
+[*] Pinned mods (B) always stay on top
+[*] Profiles (P): save up to 4 mod sets, plus &quot;as at game start&quot; and &quot;everything off&quot;
+[*] REPENTOGON search (CTRL) and undo (BACKSPACE) keep working
+[*] F2 switches back to the plain vanilla list
+[*] English and Russian (follows the game language, L to switch)
+[/list]
+
+Mods are still switched by the game itself, so nothing about saving changes. Applying a profile walks the cursor through every mod that has to change; press ENTER once per mod.
+
+Previews: a mod's own thumb.png (PNG) is shown automatically. For the rest, run tools/make_thumbs.py --download (Python 3 + Pillow) to fetch the Workshop pictures.</description>
+    <version>2.2</version>
+    <visibility>Public</visibility>
+    <tag id="Lua"/>
+    <tag id="Tweaks"/>
+</metadata>
