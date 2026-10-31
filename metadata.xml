@@ -18,14 +18,17 @@ The vanilla Mods menu, redrawn with the game's own paper sprites and made actual
 [*] Pinned mods (B) always stay on top
 [*] Profiles (P): save up to 4 mod sets, plus &quot;as at game start&quot; and &quot;everything off&quot;
 [*] REPENTOGON search (CTRL) and undo (BACKSPACE) keep working
+[*] Settings of other mods (O) from Mod Config Menu and Dead Sea Scrolls, right on the page
 [*] F2 switches back to the plain vanilla list
 [*] English and Russian (follows the game language, L to switch)
 [/list]
 
+Settings changed here are written into the mod when a run starts, after it has loaded its own config. Dead Sea Scrolls buttons that need a run stay greyed out.
+
 Mods are still switched by the game itself, so nothing about saving changes. Applying a profile walks the cursor through every mod that has to change; press ENTER once per mod.
 
 Previews: a mod's own thumb.png (PNG) is shown automatically. For the rest, run tools/make_thumbs.py --download (Python 3 + Pillow) to fetch the Workshop pictures.</description>
-    <version>2.2</version>
+    <version>2.3</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>

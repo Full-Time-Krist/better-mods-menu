@@ -1,8 +1,9 @@
 -- Better Mods Menu v2 for The Binding of Isaac: Repentance+ (requires REPENTOGON)
 --
 -- Redraws the vanilla Mods menu with the game's own paper sprites and adds
--- search, filters, sorting, favourites, mod details, dependency warnings and
--- profiles. Mods are still toggled by the vanilla menu itself: we only move its
+-- search, filters, sorting, favourites, mod details, dependency warnings,
+-- profiles and a page for other mods' settings (MCM, DSS).
+-- Mods are still toggled by the vanilla menu itself: we only move its
 -- cursor (ModsMenu.SetSelectedElement) and let the confirm press through, so
 -- REPENTOGON writes disable.it exactly like it does without this mod.
 local BMM = RegisterMod("Better Mods Menu", 1)
@@ -18,6 +19,7 @@ local Rep = include("bmm.repsearch")
 local UI = include("bmm.ui")
 local Save = include("bmm.save")
 local Lang = include("bmm.lang")
+local Config = include("bmm.config")
 local T = Lang.T
 
 local DEV = false -- jump straight to the mods menu on boot (used for testing)
@@ -41,7 +43,9 @@ local S = {
   filter = 1,
   sort = 1,
   favs = {},
-  panel = nil,            -- nil | "profiles"
+  panel = nil,            -- nil | "profiles" | "settings"
+  cfg = nil,              -- settings page stack: { { page, cursor, scroll } }
+  cfgCapture = nil,       -- key binding row waiting for a key press
   profileRows = {},
   profileCursor = 1,
   search = "",
@@ -61,6 +65,7 @@ local maskSet = false
 local confirmWasAllowed = false
 local pointerMod = nil    -- mod the vanilla menu will toggle on confirm
 local jumped = false
+local wasActive = false
 local debugOverlay = false
 local held = {}
 
@@ -285,6 +290,137 @@ local function saveProfile(slot)
   buildProfileRows()
 end
 
+-------------------------------------------------------------------- settings of other mods
+
+local SELECTABLE = { bool = true, choice = true, number = true, key = true, link = true }
+
+local function cfgClamp(top)
+  local rows = top.page.rows
+  top.cursor = U.clamp(top.cursor, 1, math.max(1, #rows))
+  if top.cursor - 1 < top.scroll then top.scroll = top.cursor - 1 end
+  if top.cursor > top.scroll + UI.ROWS then top.scroll = top.cursor - UI.ROWS end
+  top.scroll = U.clamp(top.scroll, 0, math.max(0, #rows - UI.ROWS))
+end
+
+local function cfgMove(top, dir)
+  local rows = top.page.rows
+  local n = top.cursor
+  for _ = 1, #rows do
+    n = (n - 1 + dir) % #rows + 1
+    if SELECTABLE[rows[n].kind] then
+      top.cursor = n
+      cfgClamp(top)
+      sfx(SND_MOVE)
+      return
+    end
+  end
+end
+
+local function cfgPush(page)
+  page.rows = page.build()
+  local top = { page = page, cursor = 0, scroll = 0 }
+  S.cfg[#S.cfg + 1] = top
+  cfgMove(top, 1)
+  if top.cursor == 0 then top.cursor = 1 end
+  sfx(SND_IN)
+end
+
+local function openSettings()
+  Config.refresh()
+  S.panel = "settings"
+  S.cfg = {}
+  S.cfgCapture = nil
+  cfgPush(Config.pageFor(S.list[S.cursor]))
+end
+
+local function closePanel()
+  S.panel = nil
+  S.cfg = nil
+  S.cfgCapture = nil
+  sfx(SND_OUT)
+end
+
+local PANELS = { "profiles", "settings" }
+
+local function openPanel(name)
+  if name == "settings" then return openSettings() end
+  S.cfg = nil
+  S.panel = name
+  if name == "profiles" then buildProfileRows() end
+  sfx(SND_IN)
+end
+
+-- LB/RB walk through the panels: the gamepad has no T or O key
+local function panelCycle()
+  local dir = (actionTriggered(BA.ACTION_MENULB) and -1 or 0) + (actionTriggered(BA.ACTION_MENURB) and 1 or 0)
+  if dir == 0 then return false end
+  for i, name in ipairs(PANELS) do
+    if name == S.panel then
+      openPanel(PANELS[(i - 1 + dir) % #PANELS + 1])
+      return true
+    end
+  end
+  return false
+end
+
+local function cfgChanged(top, row)
+  top.page.rows = top.page.build()
+  cfgClamp(top)
+  if row.restart then toast(T("t_restart"), nil) end
+end
+
+local function handleSettingsInput()
+  local top = S.cfg[#S.cfg]
+  if S.cfgCapture then
+    if keyTriggered(KEY.KEY_ESCAPE) then
+      S.cfgCapture = nil
+      return
+    end
+    local v = Config.capture(S.cfgCapture, numCtl)
+    if v then
+      Config.change(S.cfgCapture, v)
+      cfgChanged(top, S.cfgCapture)
+      S.cfgCapture = nil
+      sfx(SND_MOVE)
+    end
+    return
+  end
+  if panelCycle() then return end
+  if repeating(BA.ACTION_MENUUP) then cfgMove(top, -1) end
+  if repeating(BA.ACTION_MENUDOWN) then cfgMove(top, 1) end
+  local wheel = Input.GetMouseWheel and Input.GetMouseWheel()
+  if wheel and wheel.Y ~= 0 then cfgMove(top, wheel.Y > 0 and -1 or 1) end
+  local row = top.page.rows[top.cursor]
+  local selectable = row and SELECTABLE[row.kind]
+  if selectable then
+    local value = row.kind == "bool" or row.kind == "choice" or row.kind == "number"
+    local dir = 0
+    if repeating(BA.ACTION_MENURIGHT) then dir = 1 end
+    if repeating(BA.ACTION_MENULEFT) then dir = -1 end
+    if value and dir ~= 0 then
+      Config.step(row, dir)
+      cfgChanged(top, row)
+      sfx(SND_MOVE)
+    elseif actionTriggered(BA.ACTION_MENUCONFIRM) then
+      if row.kind == "link" then
+        return cfgPush(row.open())
+      elseif row.kind == "key" then
+        S.cfgCapture = row
+      else
+        Config.step(row, 1)
+        cfgChanged(top, row)
+      end
+      sfx(SND_MOVE)
+    end
+  end
+  if actionTriggered(BA.ACTION_MENUBACK) then
+    S.cfg[#S.cfg] = nil
+    if #S.cfg == 0 then closePanel() else sfx(SND_OUT) end
+  elseif keyTriggered(KEY.KEY_O) then
+    closePanel()
+  end
+end
+
 -------------------------------------------------------------------- input
 
 local function handleListInput()
@@ -332,14 +468,12 @@ local function handleListInput()
   end
   if keyTriggered(KEY.KEY_RIGHT_BRACKET) and S.descCut then S.descScroll = S.descScroll + 3 end
   if keyTriggered(KEY.KEY_LEFT_BRACKET) then S.descScroll = math.max(0, S.descScroll - 3) end
-  if keyTriggered(KEY.KEY_P) or actionTriggered(BA.ACTION_MENUEX) then
-    S.panel = "profiles"
-    buildProfileRows()
-    sfx(SND_IN)
-  end
+  if keyTriggered(KEY.KEY_P) or actionTriggered(BA.ACTION_MENUEX) then openPanel("profiles") end
+  if keyTriggered(KEY.KEY_O) then openPanel("settings") end
 end
 
 local function handleProfilesInput()
+  if panelCycle() then return end
   if repeating(BA.ACTION_MENUUP) then
     S.profileCursor = (S.profileCursor - 2) % #S.profileRows + 1
     sfx(SND_MOVE)
@@ -368,10 +502,7 @@ local function handleProfilesInput()
       end
     end
   end
-  if actionTriggered(BA.ACTION_MENUBACK) or keyTriggered(KEY.KEY_P) then
-    S.panel = nil
-    sfx(SND_OUT)
-  end
+  if actionTriggered(BA.ACTION_MENUBACK) or keyTriggered(KEY.KEY_P) then closePanel() end
 end
 
 -------------------------------------------------------------------- frame
@@ -383,7 +514,9 @@ local function init()
   S.sort = U.clamp(tonumber(Save.data.sort) or 1, 1, NUM_SORTS)
   snapshot = Save.processSnapshot(Model.snapshot())
   Lang.set(Save.data.lang ~= "auto" and Save.data.lang or Lang.detect())
-  UI.init(Model, Lang)
+  Config.init(Model, Save, Lang)
+  UI.init(Model, Lang, Config)
+  Config.refresh()
   if DEV then U.log("language option: " .. tostring(Options.Language) .. " -> " .. Lang.current) end
   Rep.init(UI.font)
   numCtl = controllers()
@@ -439,13 +572,13 @@ local function activeFrame()
   end
 
   -- 2) our own controls
-  if keyTriggered(KEY.KEY_F2) then
+  if not S.cfgCapture and keyTriggered(KEY.KEY_F2) then
     Save.data.classic = true
     Save.write()
     return false
   end
-  if keyTriggered(KEY.KEY_F9) then debugOverlay = not debugOverlay end
-  if keyTriggered(KEY.KEY_L) and not S.searching then
+  if not S.cfgCapture and keyTriggered(KEY.KEY_F9) then debugOverlay = not debugOverlay end
+  if keyTriggered(KEY.KEY_L) and not S.searching and not S.cfgCapture then
     -- cycle UI language; saved, so it overrides the game's language from now on
     local order, nextLang = Lang.ORDER, Lang.ORDER[1]
     for i, code in ipairs(order) do
@@ -458,7 +591,9 @@ local function activeFrame()
     toast(T("t_lang"), nil)
   end
   if not S.searching then
-    if S.panel == "profiles" then handleProfilesInput() else handleListInput() end
+    if S.panel == "profiles" then handleProfilesInput()
+    elseif S.panel == "settings" then handleSettingsInput()
+    else handleListInput() end
   end
 
   rebuildList()
@@ -505,7 +640,9 @@ local function activeFrame()
   pointerMod = (not S.dirty and idx) and target or nil
 
   -- 4) what the vanilla menu may see next frame
-  local mask = bit(BA.ACTION_MENUTAB) | bit(BA.ACTION_FULLSCREEN) | bit(BA.ACTION_MUTE)
+  local mask = bit(BA.ACTION_FULLSCREEN) | bit(BA.ACTION_MUTE)
+  -- a key binding wait or a settings page must not switch all mods off
+  if S.panel ~= "settings" then mask = mask | bit(BA.ACTION_MENUTAB) end
   if not S.panel and not S.applying then mask = mask | bit(BA.ACTION_MENUBACK) end
   local allowConfirm = pointerMod ~= nil and not S.panel
   if allowConfirm then mask = mask | bit(BA.ACTION_MENUCONFIRM) end
@@ -547,6 +684,8 @@ local function onMainMenuRender()
 
   local active = menu == MODS
   if not active then Rep.leftMenu() end
+  if active and not wasActive then Config.refresh() end -- mods add settings during a run
+  wasActive = active
 
   if Save.data.classic then
     clearMask()
@@ -568,6 +707,8 @@ local function onMainMenuRender()
   else
     clearMask()
     S.panel = nil
+    S.cfg = nil
+    S.cfgCapture = nil
     S.applying = nil
     S.dirty = true
   end
@@ -590,8 +731,18 @@ end
 
 BMM:AddCallback(ModCallbacks.MC_MAIN_MENU_RENDER, onMainMenuRender)
 
--- leaving the menu for a run: never leave the vanilla menu input masked
+-- leaving the menu for a run: MenuManager is unavailable in game, so only mark the
+-- mask stale; the first menu render after the run clears it
 BMM:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
   maskSet = true
-  clearMask()
+  confirmWasAllowed = false
+  pointerMod = nil
+end)
+
+-- other mods have loaded their config by now: write what was changed in the menu
+BMM:AddPriorityCallback(ModCallbacks.MC_POST_GAME_STARTED, 1000000, function()
+  if ready then
+    Config.commit()
+    Config.rememberRunPages()
+  end
 end)

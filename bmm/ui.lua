@@ -3,11 +3,11 @@
 -- undo note) plus a few hand-drawn pieces in the same style, so the menu keeps
 -- the original paper look.
 local U = include("bmm.util")
-local Model, Lang -- shared instances from main.lua (include() re-runs files, so no own copies)
+local Model, Lang, Config -- shared instances from main.lua (include() re-runs files, so no own copies)
 
 local UI = {}
 
-local ICON = { box = 0, box_on = 1, star = 2, warn = 3, dot = 4, glass = 5, arrow = 6, box_x = 7 }
+local ICON = { box = 0, box_on = 1, star = 2, warn = 3, dot = 4, glass = 5, arrow = 6, box_x = 7, gear = 8 }
 
 UI.ROWS = 9
 UI.ROW_H = 16
@@ -57,8 +57,8 @@ local function loadSprite(path, anim)
   return s
 end
 
-function UI.init(model, lang)
-  Model, Lang = model, lang
+function UI.init(model, lang, config)
+  Model, Lang, Config = model, lang, config
   spr.menu = loadSprite("gfx/ui/main menu/ModsMenu.anm2", "Main")
   spr.rgon = loadSprite("gfx/ui/modsmenupentogon.anm2", "SearchBar")
   spr.undo = loadSprite("gfx/ui/modsmenupentogon.anm2", "UndoPop")
@@ -248,6 +248,10 @@ local function drawRow(S, m, x, y, a)
     icon(ICON.warn, maxX - 13, y, a)
     maxX = maxX - 15
   end
+  if m.cfg then
+    icon(ICON.gear, maxX - 13, y, a * 0.8)
+    maxX = maxX - 15
+  end
   if m.enabled ~= m.enabledAtLoad then
     -- pending change marker: green = will be added, red = will be removed
     text(m.enabled and "+" or "-", maxX - 7, y + 1, withAlpha(m.enabled and GREEN or RED, a), 1)
@@ -365,16 +369,13 @@ local function cardPaper(S, alpha)
   return pos.X + p, pos.Y + p - 1, L.cardW - 2 * p, pos.Y + L.cardH - p - 2
 end
 
-local function drawThumb(S, m, x, y, alpha)
-  local t = thumbFor(S, m)
-  if not t then return false end
+-- t = { path, anim, w, h } fitted into the n x n box, centred, keeping the aspect ratio
+local function drawFitted(S, t, x, y, n, alpha)
   if S.thumbLoaded ~= t.path then
     spr.thumb:ReplaceSpritesheet(0, t.path, true)
     spr.thumb:SetFrame(t.anim, 0)
     S.thumbLoaded = t.path
   end
-  -- fit into the n x n box, centred, keeping the aspect ratio
-  local n = L.thumb
   local k = n / math.max(t.w, t.h)
   local w, h = math.floor(t.w * k + 0.5), math.floor(t.h * k + 0.5)
   local px, py = x + (n - w) // 2, y + (n - h) // 2
@@ -388,6 +389,12 @@ local function drawThumb(S, m, x, y, alpha)
   rect(px - 1, py + h, w + 2, 1, c)
   rect(px - 1, py - 1, 1, h + 2, c)
   rect(px + w, py - 1, 1, h + 2, c)
+end
+
+local function drawThumb(S, m, x, y, alpha)
+  local t = thumbFor(S, m)
+  if not t then return false end
+  drawFitted(S, t, x, y, L.thumb, alpha)
   return true
 end
 
@@ -439,6 +446,8 @@ local function drawInfoCard(S, alpha)
   text(fit(status, 0.75, fonts.main, w), x, y, withAlpha(color, alpha), 0.75)
   if m.isSelf and not m.enabled then
     textRight(T("this_menu"), x + w, y + 1, withAlpha(RED, alpha), 1, fonts.small)
+  elseif m.cfg then
+    textRight(T("has_settings"), x + w, y + 1, withAlpha(SOFT, alpha), 1, fonts.small)
   end
   y = y + 11
 
@@ -500,6 +509,115 @@ local function drawProfilesCard(S, alpha)
   end
 end
 
+local function drawConfigRow(S, top, row, x, y, a, selected)
+  local k = row.kind
+  local right = S.A.X + L.tagRightX
+  if k == "space" then return end
+  local ok, label = pcall(row.label)
+  label = ok and label or ""
+  if k == "head" then
+    text(fit(label, 0.9, fonts.main, right - x), x + 2, y + 1, withAlpha(INK, a), 0.9)
+    return
+  end
+  if k == "text" or k == "run" then
+    text(fit(label, 0.75, fonts.main, right - x - 46), x + 18, y + 2, withAlpha(k == "run" and FADED or SOFT, a), 0.75)
+    if k == "run" then textRight(T("cfg_in_run"), right, y + 3, withAlpha(FADED, a), STAMP) end
+    return
+  end
+  if selected then drawCursor(x - 1, y + 6, a) end
+  local value
+  local nameX = S.A.X + L.nameX
+  if k == "bool" then
+    local on = Config.value(row)
+    icon(on and ICON.box_on or ICON.box, nameX - 2, y - 1, a * (on and 1 or 0.7))
+    nameX = nameX + 16
+  elseif k == "choice" then
+    value = "< " .. tostring(row.choices[Config.value(row) or 1] or "?") .. " >"
+  elseif k == "number" then
+    if row.scroll or row.suffix or row.noDisplay then
+      value = "< " .. tostring(Config.value(row) or 0) .. (row.suffix or "") .. " >"
+    end
+  elseif k == "key" then
+    if S.cfgCapture == row then
+      value = T("cfg_press_key")
+    elseif not row.live or row.noDisplay then -- MCM keeps the key in its own label
+      value = Config.keyName(row, Config.value(row))
+    end
+  elseif k == "link" then
+    if row.tag then value = row.tag else icon(ICON.arrow, right - 15, y, a * 0.8) end
+  end
+  local maxX = right - (k == "link" and not row.tag and 18 or 0)
+  if value then
+    value = fit(value, 0.75, fonts.main, (right - nameX) * 0.55)
+    textRight(value, right, y + 2, withAlpha(S.cfgCapture == row and RED or SOFT, a), 0.75)
+    maxX = right - width(value, 0.75) - 6
+  end
+  text(fit(label, 0.9, fonts.main, maxX - nameX), nameX, y + 1, withAlpha(INK, a), 0.9)
+end
+
+local function drawConfigRows(S, top, alpha)
+  local A = S.A
+  local x = A.X + L.rowX
+  local rows = top.page.rows
+  updateCamera(top)
+  local cam = top.camY
+  local ytop = A.Y + L.rowY
+  local bottom = ytop + UI.ROWS * UI.ROW_H
+  local first = math.max(1, math.floor(cam / UI.ROW_H))
+  for i = first, math.min(#rows, first + UI.ROWS + 1) do
+    local y = ytop + (i - 1) * UI.ROW_H - cam
+    local a = math.min(1, (y - ytop + FADE) / FADE, (bottom - y) / FADE)
+    if a > 0.02 then drawConfigRow(S, top, rows[i], x, y, alpha * a, i == top.cursor) end
+  end
+  if #rows > UI.ROWS then
+    local h = UI.ROWS * UI.ROW_H - 4
+    local bx = A.X + L.scrollX
+    rect(bx, ytop, 1, h, withAlpha(FADED, alpha))
+    local kh = math.max(8, h * UI.ROWS / #rows)
+    local ky = ytop + (h - kh) * U.clamp(cam / (math.max(1, #rows - UI.ROWS) * UI.ROW_H), 0, 1)
+    rect(bx - 1, ky, 3, kh, withAlpha(SOFT, alpha))
+  end
+end
+
+local function drawConfigHeader(S, top, alpha)
+  local A = S.A
+  drawPaperHeader(A, alpha)
+  local x = A.X + L.rowX
+  text(T("settings"), A.X + L.countX, A.Y + L.countY, withAlpha(SOFT, alpha), 0.75)
+  text(fit(top.page.title, 0.75, fonts.main, A.X + L.tagRightX - x), x + 2, A.Y + L.headerY, withAlpha(INK, alpha), 0.75)
+end
+
+local function drawConfigCard(S, top, alpha)
+  local x, y, w = cardPaper(S, alpha)
+  text(fit(top.page.title, 0.9, fonts.main, w), x, y, withAlpha(INK, alpha), 0.9)
+  y = y + 13
+  if top.page.source then
+    text(T("cfg_source", top.page.source), x, y, withAlpha(SOFT, alpha), 1, fonts.small)
+    y = y + SMALL_LINE + 3
+  end
+  local row = top.page.rows[top.cursor]
+  local info = ""
+  if row then
+    local ok, res = pcall(row.info or function() return "" end)
+    info = ok and res or ""
+  end
+  if info == "" then info = top.page.info or "" end
+  if #top.page.rows == 1 and top.page.rows[1].kind == "text" and not top.page.source then
+    info = T("cfg_none_info")
+  end
+  for _, line in ipairs(wrap(info, 1, fonts.small, w, 8)) do
+    text(line, x, y, withAlpha(SOFT, alpha), 1, fonts.small)
+    y = y + SMALL_LINE
+  end
+  if row and row.id and Config.isQueued(row) then
+    y = y + 2
+    for _, line in ipairs(wrap(T("cfg_saved"), 1, fonts.small, w, 3)) do
+      text(line, x, y, withAlpha(GREEN, alpha), 1, fonts.small)
+      y = y + SMALL_LINE
+    end
+  end
+end
+
 -------------------------------------------------------------------- bottom bar
 
 local function drawBar(S, alpha)
@@ -521,7 +639,12 @@ local function drawBar(S, alpha)
   elseif S.toast and S.toast.until_ > Isaac.GetFrameCount() then
     text(fit(S.toast.text, 0.9, fonts.main, maxW), p.X, p.Y, withAlpha(S.toast.color or INK, alpha), 0.9)
   else
-    local hint = S.gamepad and T("hint_pad") or T("hint_keys")
+    local hint
+    if S.panel == "settings" then
+      hint = S.gamepad and T("hint_cfg_pad") or T("hint_cfg")
+    else
+      hint = S.gamepad and T("hint_pad") or T("hint_keys")
+    end
     text(fit(hint, 0.75, fonts.main, maxW + 8), p.X - 8, p.Y + 1, withAlpha(SOFT, alpha), 0.75)
   end
 end
@@ -531,13 +654,21 @@ end
 function UI.draw(S, alpha)
   updateCamera(S)
   drawPaper(S, alpha)
-  drawRows(S, alpha)
-  drawHeader(S, alpha)
+  local top = S.panel == "settings" and S.cfg and S.cfg[#S.cfg]
+  if top then
+    drawConfigRows(S, top, alpha)
+    drawConfigHeader(S, top, alpha)
+  else
+    drawRows(S, alpha)
+    drawHeader(S, alpha)
+  end
   drawTabNote(S, alpha)
   drawUndoNote(S, alpha)
   drawBar(S, alpha)
   -- the card lies on top of the bar's right end, like the vanilla notes do
-  if S.panel == "profiles" then
+  if top then
+    drawConfigCard(S, top, alpha)
+  elseif S.panel == "profiles" then
     drawProfilesCard(S, alpha)
   else
     drawInfoCard(S, alpha)

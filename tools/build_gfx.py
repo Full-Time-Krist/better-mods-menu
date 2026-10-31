@@ -15,7 +15,7 @@ INK = (30, 24, 26, 255)
 CELL = 16
 
 # Icon frame order (keep in sync with ICON in bmm/ui.lua)
-ICONS = ["box", "box_on", "star", "warn", "dot", "glass", "arrow", "box_x"]
+ICONS = ["box", "box_on", "star", "warn", "dot", "glass", "arrow", "box_x", "gear"]
 
 rnd = random.Random(1337)
 
@@ -63,6 +63,11 @@ def draw_icon(d, name, ox, oy):
     elif name == "arrow":
         d.line([(ox + 2, oy + 8), (ox + 13, oy + 8)], fill=INK, width=2)
         d.line([(ox + 9, oy + 4), (ox + 13, oy + 8), (ox + 9, oy + 12)], fill=INK, width=2)
+    elif name == "gear":
+        d.ellipse([ox + 4, oy + 4, ox + 12, oy + 12], outline=INK, width=2)
+        for x0, y0, x1, y1 in [(8, 1, 8, 3), (8, 13, 8, 15), (1, 8, 3, 8), (13, 8, 15, 8),
+                               (3, 3, 4, 4), (12, 12, 13, 13), (13, 3, 12, 4), (3, 13, 4, 12)]:
+            d.line([(ox + x0, oy + y0), (ox + x1, oy + y1)], fill=INK, width=2)
 
 
 FRAME = ('<Frame XPosition="0" YPosition="0" XPivot="{px}" YPivot="{py}" XCrop="{cx}" YCrop="{cy}" '
