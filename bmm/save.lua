@@ -14,6 +14,8 @@ local DEFAULT = {
   sort = 1,
   lang = "auto",      -- "auto" follows the game's language, or "en" / "ru"
   classic = false,    -- true = show the plain vanilla list
+  pendingConfig = {}, -- settings of other mods waiting for the next run: [row id] = value
+  cfgCache = {},      -- MCM pages that mods add only in a run: [category] = { subs = {...} }
   proc = nil,         -- { start = <os.time estimate>, states = { [dir] = bool } }
 }
 
