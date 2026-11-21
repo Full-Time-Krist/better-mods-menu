@@ -503,7 +503,7 @@ local function drawProfilesCard(S, alpha)
     y = y + 12
   end
   y = math.max(y + 3, bottom - 2 * (SMALL_LINE + 1))
-  for _, line in ipairs(T("profile_hints")) do
+  for _, line in ipairs(T(S.gamepad and "profile_hints_pad" or "profile_hints")) do
     text(fit(line, 1, fonts.small, w), x, y, withAlpha(SOFT, alpha), 1, fonts.small)
     y = y + SMALL_LINE + 1
   end
@@ -539,7 +539,7 @@ local function drawConfigRow(S, top, row, x, y, a, selected)
     end
   elseif k == "key" then
     if S.cfgCapture == row then
-      value = T("cfg_press_key")
+      value = T(row.pad and "cfg_press_button" or S.gamepad and "cfg_press_key_pad" or "cfg_press_key")
     elseif not row.live or row.noDisplay then -- MCM keeps the key in its own label
       value = Config.keyName(row, Config.value(row))
     end

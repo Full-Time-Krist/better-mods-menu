@@ -376,6 +376,16 @@ local function handleSettingsInput()
       S.cfgCapture = nil
       return
     end
+    -- a keyboard binding can't be finished from the pad: let its B cancel the wait
+    if not S.cfgCapture.pad then
+      for i = 1, numCtl do
+        if Input.IsActionTriggered(BA.ACTION_MENUBACK, i) then
+          S.cfgCapture = nil
+          sfx(SND_OUT)
+          return
+        end
+      end
+    end
     local v = Config.capture(S.cfgCapture, numCtl)
     if v then
       Config.change(S.cfgCapture, v)
@@ -488,7 +498,7 @@ local function handleProfilesInput()
     if t then startApply(row.special and row.label or T("n_profile", row.slot), t) else toast(T("t_empty_slot"), nil) end
     return
   end
-  if row and row.slot and keyTriggered(KEY.KEY_S) then saveProfile(row.slot) end
+  if row and row.slot and (keyTriggered(KEY.KEY_S) or actionTriggered(BA.ACTION_MENUEX)) then saveProfile(row.slot) end
   if row and row.slot and keyTriggered(KEY.KEY_C) then
     Save.data.profiles["p" .. row.slot] = nil
     Save.write()
