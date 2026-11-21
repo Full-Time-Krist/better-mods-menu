@@ -69,7 +69,7 @@ local function findDeps(m, all)
       for _, o in ipairs(all) do
         if o ~= m and not IGNORE_AS_DEP[o.id] and not deps[o.dir] then
           local hit = false
-          if o.id ~= "" and o.id:match("^%d+$") and window:find("id=" .. o.id, 1, true) then hit = true end
+          if o.id ~= "" and o.id:match("^%d+$") and window:find("id=" .. o.id .. "%f[%D]") then hit = true end
           if not hit and #o.simple >= 6 and window:find(o.simple, 1, true) then hit = true end
           if not hit and o.alias and window:find(o.alias, 1, true) then hit = true end
           -- "needed for new version" style sentences describe the reverse relation
@@ -143,7 +143,7 @@ end
 
 -- Exact replica of the list REPENTOGON draws: enabled mods first, then
 -- disabled ones, each group in load order, filtered by its search string.
--- Returns array of mods (index 1 == vanilla SelectedElement 0).
+-- Returns array of mods (index 1 == C++ SelectedElement 0; Lua's accessor is 1-based).
 function Model.vanillaView(search)
   local view = {}
   local i = 1

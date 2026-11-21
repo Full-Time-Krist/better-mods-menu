@@ -27,9 +27,16 @@ function Save.load(mod)
   end
   data = data or {}
   for k, v in pairs(DEFAULT) do
-    if data[k] == nil then
+    if type(data[k]) ~= type(v) then
       data[k] = type(v) == "table" and {} or v
     end
+  end
+  for slot, profile in pairs(data.profiles) do
+    if type(profile) ~= "table" or type(profile.set) ~= "table" then data.profiles[slot] = nil end
+  end
+  local proc = data.proc
+  if type(proc) ~= "table" or type(proc.start) ~= "number" or type(proc.states) ~= "table" then
+    data.proc = nil
   end
   Save.data = data
   Save.mod = mod

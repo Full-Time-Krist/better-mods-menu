@@ -31,6 +31,12 @@ local ALL_INPUT = 0xFFFFFFFF
 local SND_MOVE = SoundEffect.SOUND_MENU_SCROLL
 local SND_IN = SoundEffect.SOUND_PAPER_IN
 local SND_OUT = SoundEffect.SOUND_PAPER_OUT
+-- the game's own switch sounds: light/dark flip of the character select for
+-- on/off, its arrows for left/right
+local SND_ON = SoundEffect.SOUND_MENU_FLIP_LIGHT
+local SND_OFF = SoundEffect.SOUND_MENU_FLIP_DARK
+local SND_LEFT = SoundEffect.SOUND_CHARACTER_SELECT_LEFT
+local SND_RIGHT = SoundEffect.SOUND_CHARACTER_SELECT_RIGHT
 
 local NUM_FILTERS = UI.NUM_FILTERS
 local NUM_SORTS = UI.NUM_SORTS
@@ -71,8 +77,13 @@ local held = {}
 
 -------------------------------------------------------------------- helpers
 
+-- MENU_SCROLL is the game's own cursor sound but is mixed far quieter than the
+-- rest (measured ~10x): it gets lost under the menu music at normal volume
+local LOUDER = {}
+if SND_MOVE then LOUDER[SND_MOVE] = 3.5 end
+
 local function sfx(id)
-  if id then SFXManager():Play(id, 0.8) end
+  if id then SFXManager():Play(id, LOUDER[id] or 0.8) end
 end
 
 local function toast(msg, color)
@@ -142,6 +153,13 @@ local FILTERS = {
   function(m) return m.enabled and #Model.missingDeps(m) > 0 end,
 }
 
+local function filterHasMods(i)
+  for _, m in ipairs(Model.mods) do
+    if FILTERS[i](m) then return true end
+  end
+  return false
+end
+
 local CAT_ORDER = { API = 1, CONTENT = 2, QOL = 3, VISUAL = 4 }
 
 local function sortKey(a, b)
@@ -161,6 +179,8 @@ local function rebuildList()
   end
   local list = {}
   -- a search always looks through every mod
+  -- the filter's last mod left it (switched, unpinned, undone): show everything
+  if S.search == "" and S.filter ~= 1 and not filterHasMods(S.filter) then S.filter = 1 end
   local f = S.search ~= "" and FILTERS[1] or FILTERS[S.filter]
   for _, m in ipairs(Model.mods) do
     if f(m) and (not inView or inView[m]) then list[#list + 1] = m end
@@ -176,10 +196,12 @@ local function rebuildList()
     end
   end
   S.cursor = U.clamp(keep or S.cursor, 1, math.max(1, #list))
-  if list[S.cursor] then selectedDir = list[S.cursor].dir end
-  local maxScroll = math.max(0, #list - UI.ROWS)
+  local nextDir = list[S.cursor] and list[S.cursor].dir
+  if nextDir ~= selectedDir then S.descScroll = 0 end
+  selectedDir = nextDir
+  local maxScroll = math.max(0, #list - UI.LIST_ROWS)
   if S.cursor - 1 < S.scroll then S.scroll = S.cursor - 1 end
-  if S.cursor > S.scroll + UI.ROWS then S.scroll = S.cursor - UI.ROWS end
+  if S.cursor > S.scroll + UI.LIST_ROWS then S.scroll = S.cursor - UI.LIST_ROWS end
   S.scroll = U.clamp(S.scroll, 0, maxScroll)
 end
 
@@ -199,9 +221,25 @@ local function moveCursor(delta)
   end
 end
 
+-- steps over filters with no mods in them; "all" always stays reachable
 local function setFilter(f)
-  S.filter = (f - 1) % NUM_FILTERS + 1
-  sfx(SND_MOVE)
+  local dir = f < S.filter and -1 or 1
+  local n = (f - 1) % NUM_FILTERS + 1
+  for _ = 1, NUM_FILTERS do
+    if n == 1 or filterHasMods(n) then break end
+    n = (n - 1 + dir) % NUM_FILTERS + 1
+  end
+  if n ~= S.filter then sfx(dir < 0 and SND_LEFT or SND_RIGHT) end
+  S.filter = n
+end
+
+-- a settings value was stepped: on/off for checkboxes, left/right for the rest
+local function stepSound(row, dir)
+  if row.kind == "bool" then
+    sfx(Config.value(row) and SND_ON or SND_OFF)
+  else
+    sfx(dir < 0 and SND_LEFT or SND_RIGHT)
+  end
 end
 
 -------------------------------------------------------------------- profiles / apply
@@ -410,17 +448,18 @@ local function handleSettingsInput()
     if value and dir ~= 0 then
       Config.step(row, dir)
       cfgChanged(top, row)
-      sfx(SND_MOVE)
+      stepSound(row, dir)
     elseif actionTriggered(BA.ACTION_MENUCONFIRM) then
       if row.kind == "link" then
         return cfgPush(row.open())
       elseif row.kind == "key" then
         S.cfgCapture = row
+        sfx(SND_MOVE)
       else
         Config.step(row, 1)
         cfgChanged(top, row)
+        stepSound(row, 1)
       end
-      sfx(SND_MOVE)
     end
   end
   if actionTriggered(BA.ACTION_MENUBACK) then
@@ -444,8 +483,8 @@ local function handleListInput()
   end
   if repeating(BA.ACTION_MENUUP) then moveCursor(-1) end
   if repeating(BA.ACTION_MENUDOWN) then moveCursor(1) end
-  if keyTriggered(KEY.KEY_PAGE_UP) or actionTriggered(BA.ACTION_MENULT) then moveCursor(-UI.ROWS) end
-  if keyTriggered(KEY.KEY_PAGE_DOWN) or actionTriggered(BA.ACTION_MENURT) then moveCursor(UI.ROWS) end
+  if keyTriggered(KEY.KEY_PAGE_UP) or actionTriggered(BA.ACTION_MENULT) then moveCursor(-UI.LIST_ROWS) end
+  if keyTriggered(KEY.KEY_PAGE_DOWN) or actionTriggered(BA.ACTION_MENURT) then moveCursor(UI.LIST_ROWS) end
   if keyTriggered(KEY.KEY_HOME) then moveCursor(-#S.list) end
   if keyTriggered(KEY.KEY_END) then moveCursor(#S.list) end
   local wheel = Input.GetMouseWheel and Input.GetMouseWheel()
@@ -558,33 +597,51 @@ local function updateAnchor(active)
   return o
 end
 
-local function activeFrame()
-  -- 1) catch up with what REPENTOGON did in this frame's Update/Render
+-- Also runs in classic mode: REPENTOGON keeps changing its search and enabled
+-- states there, and returning through F2 must use the same vanilla list.
+local function syncVanilla()
   local searchingAtUpdate = Rep.searching
+  -- In classic mode LB reaches REPENTOGON's undo handler. In our menu it is
+  -- masked from vanilla and used to change filters instead.
+  local padUndo = Save.data.classic and actionTriggered(BA.ACTION_MENULB) and S.gamepad
   local ev = Rep.step(#Model.mods, S.gamepad)
   S.searching = Rep.searching
   if ev.changed then
     S.search = Rep.str
   end
-  if ev.undo then
-    Model.applyStates(snapshot)
-    S.applying = nil
-    toast(T("t_undone"), nil)
-  end
-
   local confirm = actionTriggered(BA.ACTION_MENUCONFIRM)
   if confirm and confirmWasAllowed and pointerMod and not searchingAtUpdate
     and not Input.IsButtonTriggered(KEY.KEY_LEFT_CONTROL, 0) then
     pointerMod.enabled = not pointerMod.enabled
+    -- the vanilla toggle is silent
+    if not Save.data.classic then sfx(pointerMod.enabled and SND_ON or SND_OFF) end
     if S.applying then
       S.applying.plan = planFor(S.applying.target)
     end
   end
+  -- Confirm is processed in Update; undo happens afterwards in Render.
+  if ev.undo or (padUndo and not searchingAtUpdate) then
+    Model.applyStates(snapshot)
+    S.applying = nil
+    toast(T("t_undone"), nil)
+  end
+end
+
+local function trackClassicPointer()
+  local view = Model.vanillaView(S.search)
+  pointerMod = view[ModsMenu.GetSelectedElement()]
+  confirmWasAllowed = pointerMod ~= nil
+end
+
+local function activeFrame()
+  -- 1) catch up with what REPENTOGON did in this frame's Update/Render
+  syncVanilla()
 
   -- 2) our own controls
   if not S.cfgCapture and keyTriggered(KEY.KEY_F2) then
     Save.data.classic = true
     Save.write()
+    S.panel, S.cfg, S.cfgCapture, S.applying = nil, nil, nil, nil
     return false
   end
   if not S.cfgCapture and keyTriggered(KEY.KEY_F9) then debugOverlay = not debugOverlay end
@@ -674,7 +731,8 @@ local function fail(err)
   failed = true
 end
 
-local function onMainMenuRender()
+local onMainMenuRender
+local function renderMenu()
   if failed then return end
   if not ready then
     local ok, err = pcall(init)
@@ -698,8 +756,10 @@ local function onMainMenuRender()
   wasActive = active
 
   if Save.data.classic then
+    if active then syncVanilla() end
     clearMask()
-      if active and keyTriggered(KEY.KEY_F2) then
+    if active then trackClassicPointer() end
+    if active and keyTriggered(KEY.KEY_F2) then
       Save.data.classic = false
       Save.write()
     end
@@ -712,6 +772,7 @@ local function onMainMenuRender()
     if not ok then return fail(res) end
     if not res then
       clearMask()
+      trackClassicPointer()
       return
     end
   else
@@ -737,6 +798,12 @@ local function onMainMenuRender()
       UI.drawDebug(S, S.debugView, ModsMenu.GetSelectedElement() - 1)
     end
   end
+end
+
+onMainMenuRender = function()
+  if failed then return end
+  local ok, err = pcall(renderMenu)
+  if not ok then fail(err) end
 end
 
 BMM:AddCallback(ModCallbacks.MC_MAIN_MENU_RENDER, onMainMenuRender)

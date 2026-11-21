@@ -30,14 +30,20 @@ local VALUE_KINDS = { bool = true, number = true }
 -- a mod's Display function may fail every frame until its config is loaded: log once
 local logged = {}
 
-local function try(f, ...)
+local function call(f, ...)
   local ok, res = pcall(f, ...)
-  if ok then return res end
+  if ok then return true, res end
   res = tostring(res)
   if not logged[res] then
     logged[res] = true
     U.log("config: " .. res)
   end
+  return false, res
+end
+
+local function try(f, ...)
+  local ok, res = call(f, ...)
+  if ok then return res end
 end
 
 -- MCM and DSS texts may be strings, numbers, lists of lines or functions
@@ -77,9 +83,11 @@ function Config.step(row, dir)
     Config.change(row, ((cur or 1) + dir - 1) % row.count + 1)
   elseif row.kind == "number" then
     local n, by = (cur or row.min or 0) + dir * row.by, row.by
-    if row.min and row.max then
-      if n > row.max then n = row.noLoop and row.max or row.min end
-      if n < row.min then n = row.noLoop and row.min or row.max end
+    if row.max and n > row.max then
+      n = not row.noLoop and row.min or row.max
+    end
+    if row.min and n < row.min then
+      n = not row.noLoop and row.max or row.min
     end
     if math.floor(by) == by then n = math.floor(n) else n = math.floor(n * 1000 + 0.5) / 1000 end
     Config.change(row, n)
@@ -265,7 +273,7 @@ local function dssRow(tbl, key, item, btn, i)
     row.open = function() return dssPage(tbl, btn.dest) end
   elseif btn.variable or btn.setting ~= nil then
     if btn.choices then
-      row.kind, row.count = "choice", #btn.choices
+      row.kind, row.count = #btn.choices > 0 and "choice" or "text", #btn.choices
       row.choices = btn.choices
     elseif btn.max then
       row.kind, row.min, row.max, row.by = "number", btn.min or 0, btn.max, btn.increment or 1
@@ -291,7 +299,7 @@ local function dssRows(tbl, key)
     if btn.generate then try(btn.generate, btn, item, tbl) end
     dssReload(tbl, item, btn)
     local shown = btn.display ~= false
-    if shown and btn.displayif then shown = try(btn.displayif, btn, item, tbl) ~= false end
+    if shown and btn.displayif then shown = not not try(btn.displayif, btn, item, tbl) end
     local row = shown and dssRow(tbl, key, item, btn, i)
     if row then rows[#rows + 1] = row end
   end
@@ -460,14 +468,15 @@ end
 -- Folio has one per achievement and writing them zeroes its counters, so the handler
 -- sees an empty directory here; the changed buttons have already been stored.
 local function dssSave(tbl)
-  if not tbl.Close then return end
+  if not tbl.Close then return false end
   local directory = tbl.Directory
   local main = tbl.DirectoryKey.Main or "main"
   tbl.Directory = { [main] = { buttons = {} } }
   tbl.DirectoryKey.SettingsChanged = true
-  try(tbl.Close, tbl, false, true)
+  local ok = call(tbl.Close, tbl, false, true)
   tbl.Directory = directory
   tbl.DirectoryKey.Item = directory[main]
+  return ok
 end
 
 -- writes the queued values into their mods; runs in a run, after the mods loaded
@@ -477,13 +486,20 @@ function Config.commit()
   local touched = {}
   for id, v in pairs(queue()) do
     local row = rows[id]
-    if row then
-      try(row.write, v)
-      if row.tbl then touched[row.tbl] = true end
+    if row and row.write and call(row.write, v) then
+      if row.tbl then
+        touched[row.tbl] = touched[row.tbl] or {}
+        touched[row.tbl][#touched[row.tbl] + 1] = id
+      else
+        queue()[id] = nil
+      end
     end
   end
-  for tbl in pairs(touched) do dssSave(tbl) end
-  Save.data.pendingConfig = {}
+  for tbl, ids in pairs(touched) do
+    if dssSave(tbl) then
+      for _, id in ipairs(ids) do queue()[id] = nil end
+    end
+  end
   Save.write()
 end
 

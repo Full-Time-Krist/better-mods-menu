@@ -4,31 +4,36 @@
     <directory>better-mods-menu</directory>
     <id>3819892905</id>
     <description>[h1]Better Mods Menu[/h1]
-The vanilla Mods menu, redrawn with the game's own paper sprites and made actually usable with a big mod list. This mod is fully vibe-coded.
+The vanilla Mods menu, redrawn with the game's own paper sprites and fonts and made actually usable with a big mod list. This mod is fully vibe-coded.
 
 [b]Requires REPENTOGON.[/b]
 
 [list]
 [*] The page stays still and the list scrolls smoothly under its header
-[*] Checkboxes, category stamps (API / CONTENT / QOL / VISUAL) and a pending-change marker on every mod
-[*] Info card: name, version, Workshop id, tags, preview picture and the description
+[*] Mod covers next to the names (see Covers below), a gear on mods that have settings, category stamps (API / CONTENT / QOL / VISUAL) and a pending-change marker
+[*] Info card: name, version, Workshop id, tags, cover and the description
 [*] Dependency warnings when an enabled mod needs one that is off; press D to enable what is missing
-[*] Filters (Q/E or LB/RB): all, on, off, pinned, API, content, QoL, visual, changed, broken
+[*] Filters (Q/E or LB/RB): all, on, off, pinned, API, content, QoL, visual, changed, broken. Empty ones are skipped
 [*] Sorting (S): by name, enabled first, by category
 [*] Pinned mods (B) always stay on top
 [*] Profiles (P): save up to 4 mod sets, plus &quot;as at game start&quot; and &quot;everything off&quot;
 [*] REPENTOGON search (CTRL) and undo (BACKSPACE) keep working
 [*] Settings of other mods (O) from Mod Config Menu and Dead Sea Scrolls, right on the page
+[*] The game's own menu sounds for moving, switching mods on and off and changing values
+[*] Gamepad: d-pad, A toggles, LB/RB filter, LT/RT page, Y panels; Y saves a profile, B cancels a key binding wait
 [*] F2 switches back to the plain vanilla list
 [*] English and Russian (follows the game language, L to switch)
 [/list]
 
-Settings changed here are written into the mod when a run starts, after it has loaded its own config. Dead Sea Scrolls buttons that need a run stay greyed out.
+Settings changed here are written into the mod when a run starts, after it has loaded its own config. A change that can't be applied yet (mod missing or failing) waits for the next run. Dead Sea Scrolls buttons that need a run stay greyed out.
 
 Mods are still switched by the game itself, so nothing about saving changes. Applying a profile walks the cursor through every mod that has to change; press ENTER once per mod.
 
-Previews: a mod's own thumb.png (PNG) is shown automatically. For the rest, run tools/make_thumbs.py --download (Python 3 + Pillow) to fetch the Workshop pictures.</description>
-    <version>2.3</version>
+[h2]Covers[/h2]
+Mods can't reach the internet, so covers come from your disk: a mod's own thumb.png (if it is a real PNG) is shown automatically. To get the Workshop pictures of all your mods, run [i]tools/make_thumbs.py --download[/i] from this mod's folder once (Python 3 + Pillow) and restart the game. Without any covers the list simply has no cover column.
+
+Source: https://github.com/Full-Time-Krist/better-mods-menu</description>
+    <version>2.4</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Tweaks"/>

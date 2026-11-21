@@ -3,14 +3,17 @@
 -- undo note) plus a few hand-drawn pieces in the same style, so the menu keeps
 -- the original paper look.
 local U = include("bmm.util")
+local Thumbs = include("bmm.thumbs")
 local Model, Lang, Config -- shared instances from main.lua (include() re-runs files, so no own copies)
 
 local UI = {}
 
 local ICON = { box = 0, box_on = 1, star = 2, warn = 3, dot = 4, glass = 5, arrow = 6, box_x = 7, gear = 8 }
 
-UI.ROWS = 9
+UI.ROWS = 9        -- settings page
 UI.ROW_H = 16
+UI.LIST_ROWS = 6   -- mods list: taller rows for the covers, same height overall
+UI.LIST_H = 24
 UI.NUM_FILTERS = 10
 UI.NUM_SORTS = 3
 
@@ -45,7 +48,6 @@ local SMALL_LINE = 8
 local STAMP = 0.7   -- menu font scale for small labels (category stamps, sort)
 
 local spr = {}
-local rowNameX = 0
 local fonts = {}
 
 local function T(...) return Lang.T(...) end
@@ -64,12 +66,10 @@ function UI.init(model, lang, config)
   spr.undo = loadSprite("gfx/ui/modsmenupentogon.anm2", "UndoPop")
   spr.icons = loadSprite("gfx/ui/bettermods/icons.anm2", "Icon")
   spr.pixel = loadSprite("gfx/ui/bettermods/pixel.anm2", "Idle")
-  spr.thumb = loadSprite("gfx/ui/bettermods/thumb.anm2", "Idle")
   spr.card = loadSprite("gfx/ui/bettermods/card.anm2", "Idle")
   fonts.main = Font()
   fonts.main:Load("font/teammeatex/teammeatex10.fnt")
-  fonts.small = Font()
-  fonts.small:Load("font/luamini.fnt")
+  fonts.small = {} -- marker only, see resolve()
   UI.font = fonts.main
 end
 
@@ -77,14 +77,12 @@ local function withAlpha(c, a)
   return KColor(c.Red, c.Green, c.Blue, c.Alpha * a)
 end
 
--- luamini has no Cyrillic etc.: such strings use the menu font, shrunk to fit
+-- small text is the menu font shrunk: the game's own paper pages do the same, and
+-- its small HUD font has a baked-in dark outline that blots on paper
 local function resolve(str, font, scale)
-  font = font or fonts.main
   scale = scale or 1
-  if font == fonts.small and str:find("[\128-\255]") then
-    return fonts.main, scale * 0.72, -2
-  end
-  return font, scale, 0
+  if font == fonts.small then return fonts.main, scale * 0.72, -2 end
+  return font or fonts.main, scale, 0
 end
 
 local function width(str, scale, font)
@@ -122,51 +120,6 @@ local function icon(i, x, y, alpha)
   spr.icons:SetFrame("Icon", i)
   spr.icons.Color = Color(1, 1, 1, alpha or 1)
   spr.icons:Render(Vector(x, y))
-end
-
--- Thumbnails, first match wins:
---  1. resources/gfx/ui/bettermods/thumbs/<dir>.png, made by tools/make_thumbs.py (96x96)
---  2. the mod's own thumb.png, read from its folder by absolute path (any size,
---     measured once). Sprites take absolute paths, Renderer.LoadImage does not.
--- Result per mod: { path, anim, w, h } or false.
-local thumbCache = {}
-
--- REPENTOGON reports mods as "<game>\Repentogon/mods/<dir>" when started from its
--- launcher, but they live in "<game>\mods\<dir>"
-local function folderCandidates(m)
-  local full = m.fullDir
-  if type(full) ~= "string" or full == "" then return {} end
-  local fixed = full:gsub("[/\\]Repentogon[/\\]mods[/\\]", "/mods/")
-  if fixed ~= full then return { fixed .. "/thumb.png", full .. "/thumb.png" } end
-  return { full .. "/thumb.png" }
-end
-
-local function findThumb(m)
-  local key = m.dir:gsub("[^%w%-_]", "_")
-  local gen = "gfx/ui/bettermods/thumbs/" .. key .. ".png"
-  if pcall(Renderer.LoadImage, gen) then
-    return { path = gen, anim = "Idle", w = 96, h = 96 }
-  end
-  for _, path in ipairs(folderCandidates(m)) do
-    spr.thumb:ReplaceSpritesheet(0, path, true)
-    local ok, w, h = pcall(function()
-      local img = spr.thumb:GetLayer(0):GetSpritesheet()
-      return img:GetWidth(), img:GetHeight()
-    end)
-    -- 2048 is the "Big" frame; a JPEG renamed to .png (common on the Workshop) doesn't load
-    if ok and w and w > 1 and h > 1 and w <= 2048 and h <= 2048 then
-      return { path = path, anim = "Big", w = w, h = h }
-    end
-  end
-  return false
-end
-
-local function thumbFor(S, m)
-  if thumbCache[m.dir] == nil then
-    S.thumbLoaded = nil -- findThumb swaps the sheet while probing
-    thumbCache[m.dir] = findThumb(m)
-  end
-  return thumbCache[m.dir]
 end
 
 -- REPENTOGON flips the note's text crop by 64px when mods are globally on
@@ -225,40 +178,59 @@ end
 
 -------------------------------------------------------------------- list
 
+local drawFitted
+
+local THUMB = 22 -- row cover size, a list row is UI.LIST_H high
+
 local function drawRow(S, m, x, y, a)
   local on = m.enabled
-  -- the selection is shown by the vanilla arrow only, like the original menu
+  -- the selection is shown by the vanilla arrow only, like the original menu;
+  -- switched off mods are told by their faded name and cover
   local ink = on and INK or FADED
 
-  icon(on and ICON.box_on or ICON.box, x, y - 1, a * (on and 1 or 0.7))
-
-  local nx = rowNameX
+  -- left: the mod's cover, then its name
+  if UI.covers == nil then UI.covers = Thumbs.any(Model.mods) end
+  local thumb = UI.covers and Thumbs.get(m)
+  if not UI.covers then
+    x = x - THUMB - 5 -- no cover column at all
+  elseif thumb then
+    drawFitted(thumb, x, y + 1, THUMB, a * (on and 1 or 0.4), false)
+  else
+    -- keep the names in one column when a mod has no cover
+    local c = withAlpha(SOFT, a * 0.35)
+    rect(x, y + 1, THUMB, 1, c)
+    rect(x, y + THUMB, THUMB, 1, c)
+    rect(x, y + 2, 1, THUMB - 2, c)
+    rect(x + THUMB - 1, y + 2, 1, THUMB - 2, c)
+  end
+  local nx = x + THUMB + 5
+  local ty = y + 5 -- text baseline offset, centred on the cover
   if S.favs[m.dir] then
-    icon(ICON.star, nx - 1, y - 1, a * 0.85)
+    icon(ICON.star, nx - 1, ty - 1, a * 0.85)
     nx = nx + 11
   end
 
   -- right side: category stamp + warnings
-  local tag = T("cat")[m.category] or ""
   local rx = S.A.X + L.tagRightX
-  textRight(tag, rx, y + 3, withAlpha(on and SOFT or FADED, a), STAMP)
+  local tag = T("cat")[m.category] or ""
+  textRight(tag, rx, ty + 2, withAlpha(on and SOFT or FADED, a), STAMP)
   local maxX = rx - width(tag, STAMP) - 6
 
   if m.enabled and #Model.missingDeps(m) > 0 then
-    icon(ICON.warn, maxX - 13, y, a)
+    icon(ICON.warn, maxX - 13, ty - 1, a)
     maxX = maxX - 15
   end
   if m.cfg then
-    icon(ICON.gear, maxX - 13, y, a * 0.8)
-    maxX = maxX - 15
+    icon(ICON.gear, maxX - 14, ty - 1, a * 0.8)
+    maxX = maxX - 16
   end
   if m.enabled ~= m.enabledAtLoad then
     -- pending change marker: green = will be added, red = will be removed
-    text(m.enabled and "+" or "-", maxX - 7, y + 1, withAlpha(m.enabled and GREEN or RED, a), 1)
+    text(m.enabled and "+" or "-", maxX - 7, ty, withAlpha(m.enabled and GREEN or RED, a), 1)
     maxX = maxX - 10
   end
 
-  text(U.fit(fonts.main, m.name, 0.9, maxX - nx), nx, y + 1, withAlpha(ink, a), 0.9)
+  text(U.fit(fonts.main, m.name, 0.9, maxX - nx), nx, ty, withAlpha(ink, a), 0.9)
 end
 
 local function drawHeader(S, alpha)
@@ -282,11 +254,12 @@ local function drawHeader(S, alpha)
 end
 
 -- camera: eases toward the scroll target, in pixels
-local function updateCamera(S)
-  local target = S.scroll * UI.ROW_H
+local function updateCamera(S, rows, rowH)
+  rows, rowH = rows or UI.ROWS, rowH or UI.ROW_H
+  local target = S.scroll * rowH
   local cam = S.camY or target
   local d = target - cam
-  if math.abs(d) < 0.5 or math.abs(d) > UI.ROWS * UI.ROW_H * 3 then
+  if math.abs(d) < 0.5 or math.abs(d) > rows * rowH * 3 then
     cam = target   -- settled, or a jump too far to be worth animating
   else
     cam = cam + d * 0.25
@@ -299,7 +272,6 @@ local FADE = 10 -- rows fade out over this many pixels at the window edges
 local function drawRows(S, alpha)
   local A = S.A
   local x = A.X + L.rowX
-  rowNameX = A.X + L.nameX
 
   if not modsGloballyEnabled() then
     -- everything is switched off with TAB: the list still works, but fade it
@@ -313,26 +285,27 @@ local function drawRows(S, alpha)
     return
   end
 
+  local N, H = UI.LIST_ROWS, UI.LIST_H
   local cam = S.camY
   local top = A.Y + L.rowY
-  local bottom = top + UI.ROWS * UI.ROW_H
-  local first = math.max(1, math.floor(cam / UI.ROW_H))
-  for i = first, math.min(#list, first + UI.ROWS + 1) do
-    local y = top + (i - 1) * UI.ROW_H - cam
+  local bottom = top + N * H
+  local first = math.max(1, math.floor(cam / H))
+  for i = first, math.min(#list, first + N + 1) do
+    local y = top + (i - 1) * H - cam
     local a = math.min(1, (y - top + FADE) / FADE, (bottom - y) / FADE)
     if a > 0.02 then
       drawRow(S, list[i], x, y, alpha * a)
-      if i == S.cursor then drawCursor(x - 1, y + 6, alpha * a) end
+      if i == S.cursor then drawCursor(x - 1, y + 10, alpha * a) end
     end
   end
 
   -- scrollbar: thin pencil line with a knob
-  if #list > UI.ROWS then
-    local h = UI.ROWS * UI.ROW_H - 4
+  if #list > N then
+    local h = N * H - 4
     local bx = A.X + L.scrollX
     rect(bx, top, 1, h, withAlpha(FADED, alpha))
-    local kh = math.max(8, h * UI.ROWS / #list)
-    local ky = top + (h - kh) * U.clamp(cam / (math.max(1, #list - UI.ROWS) * UI.ROW_H), 0, 1)
+    local kh = math.max(8, h * N / #list)
+    local ky = top + (h - kh) * U.clamp(cam / (math.max(1, #list - N) * H), 0, 1)
     rect(bx - 1, ky, 3, kh, withAlpha(SOFT, alpha))
   end
 end
@@ -370,20 +343,17 @@ local function cardPaper(S, alpha)
 end
 
 -- t = { path, anim, w, h } fitted into the n x n box, centred, keeping the aspect ratio
-local function drawFitted(S, t, x, y, n, alpha)
-  if S.thumbLoaded ~= t.path then
-    spr.thumb:ReplaceSpritesheet(0, t.path, true)
-    spr.thumb:SetFrame(t.anim, 0)
-    S.thumbLoaded = t.path
-  end
+drawFitted = function(t, x, y, n, alpha, border)
+  local sprite = t.sprite
   local k = n / math.max(t.w, t.h)
   local w, h = math.floor(t.w * k + 0.5), math.floor(t.h * k + 0.5)
   local px, py = x + (n - w) // 2, y + (n - h) // 2
-  spr.thumb.Scale = Vector(k, k)
-  spr.thumb.Color = Color(1, 1, 1, alpha)
+  sprite.Scale = Vector(k, k)
+  sprite.Color = Color(1, 1, 1, alpha)
   -- the "Big" frame is larger than the image: cut the rest off
   local frame = t.anim == "Big" and 2048 or 96
-  spr.thumb:Render(Vector(px, py), Vector(0, 0), Vector(frame - t.w, frame - t.h))
+  sprite:Render(Vector(px, py), Vector(0, 0), Vector(frame - t.w, frame - t.h))
+  if border == false then return end
   local c = withAlpha(INK, alpha)
   rect(px - 1, py - 1, w + 2, 1, c)
   rect(px - 1, py + h, w + 2, 1, c)
@@ -392,9 +362,9 @@ local function drawFitted(S, t, x, y, n, alpha)
 end
 
 local function drawThumb(S, m, x, y, alpha)
-  local t = thumbFor(S, m)
+  local t = Thumbs.get(m)
   if not t then return false end
-  drawFitted(S, t, x, y, L.thumb, alpha)
+  drawFitted(t, x, y, L.thumb, alpha)
   return true
 end
 
@@ -446,8 +416,6 @@ local function drawInfoCard(S, alpha)
   text(fit(status, 0.75, fonts.main, w), x, y, withAlpha(color, alpha), 0.75)
   if m.isSelf and not m.enabled then
     textRight(T("this_menu"), x + w, y + 1, withAlpha(RED, alpha), 1, fonts.small)
-  elseif m.cfg then
-    textRight(T("has_settings"), x + w, y + 1, withAlpha(SOFT, alpha), 1, fonts.small)
   end
   y = y + 11
 
@@ -652,7 +620,14 @@ end
 -------------------------------------------------------------------- entry
 
 function UI.draw(S, alpha)
-  updateCamera(S)
+  -- The vanilla anchor plus our card can exceed the viewport by a few pixels.
+  -- Keep the whole card visible once the page has finished sliding in.
+  local anchor = S.A
+  if S.settled then
+    local overflow = anchor.X + L.card.X + L.cardW + 4 - Isaac.GetScreenWidth()
+    if overflow > 0 then S.A = Vector(anchor.X - overflow, anchor.Y) end
+  end
+  updateCamera(S, UI.LIST_ROWS, UI.LIST_H)
   drawPaper(S, alpha)
   local top = S.panel == "settings" and S.cfg and S.cfg[#S.cfg]
   if top then
@@ -673,6 +648,7 @@ function UI.draw(S, alpha)
   else
     drawInfoCard(S, alpha)
   end
+  S.A = anchor
 end
 
 -- Debug overlay (F9): the list exactly as REPENTOGON sees it, to verify the mapping.

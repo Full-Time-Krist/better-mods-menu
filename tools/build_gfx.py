@@ -37,6 +37,32 @@ def box(d, ox, oy):
     wobble_line(d, e, a)
 
 
+def gear_image(size=CELL, teeth=8, k=8):
+    """A cog: drawn 8x larger and reduced with a hard alpha cut, so it stays crisp pixel art."""
+    import math
+    n = size * k
+    big = Image.new("L", (n, n), 0)
+    g = ImageDraw.Draw(big)
+    c = n / 2
+    r_out, r_root, r_hole = n * 0.47, n * 0.34, n * 0.14
+    pts = []
+    for i in range(teeth):
+        a = 2 * math.pi * i / teeth
+        half = math.pi / teeth
+        for da, r in ((-half, r_root), (-half * 0.55, r_out), (half * 0.55, r_out), (half, r_root)):
+            pts.append((c + r * math.cos(a + da), c + r * math.sin(a + da)))
+    g.polygon(pts, fill=255)
+    g.ellipse([c - r_hole, c - r_hole, c + r_hole, c + r_hole], fill=0)
+    small = big.resize((size, size), Image.BOX).point(lambda v: 255 if v >= 110 else 0)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img.paste(Image.new("RGBA", (size, size), INK), (0, 0), small)
+    return img
+
+
+def atlas_gear(d, ox, oy):
+    d._image.paste(gear_image(), (ox, oy))
+
+
 def draw_icon(d, name, ox, oy):
     if name == "box":
         box(d, ox, oy)
@@ -64,11 +90,7 @@ def draw_icon(d, name, ox, oy):
         d.line([(ox + 2, oy + 8), (ox + 13, oy + 8)], fill=INK, width=2)
         d.line([(ox + 9, oy + 4), (ox + 13, oy + 8), (ox + 9, oy + 12)], fill=INK, width=2)
     elif name == "gear":
-        d.ellipse([ox + 4, oy + 4, ox + 12, oy + 12], outline=INK, width=2)
-        for x0, y0, x1, y1 in [(8, 1, 8, 3), (8, 13, 8, 15), (1, 8, 3, 8), (13, 8, 15, 8),
-                               (3, 3, 4, 4), (12, 12, 13, 13), (13, 3, 12, 4), (3, 13, 4, 12)]:
-            d.line([(ox + x0, oy + y0), (ox + x1, oy + y1)], fill=INK, width=2)
-
+        atlas_gear(d, ox, oy)
 
 FRAME = ('<Frame XPosition="0" YPosition="0" XPivot="{px}" YPivot="{py}" XCrop="{cx}" YCrop="{cy}" '
          'Width="{w}" Height="{h}" XScale="100" YScale="100" Delay="1" Visible="true" RedTint="255" '
